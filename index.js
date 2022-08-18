@@ -4,6 +4,7 @@ const http = require('http');
 const cors = require('cors');
 const PORT = 3001
 const {Server} = require("socket.io");
+const Repository = require('./repository/repository') 
 
 // resolve most of the cors issues
 app.use(cors());
@@ -17,8 +18,6 @@ const io = new Server(server, {
         origin: "http://localhost:3000",
     }
 } )
-
-let usersInRoom = {};
 
 io.on("connection", (socket) => {
 
@@ -39,22 +38,25 @@ io.on("connection", (socket) => {
 
             // if it is, we connect the player to the selected room (in this case, we hardcoded the room name to "1")
             socket.join("1")
-            // add in the dictionary the connected user
-            usersInRoom[socket.id] = username;
+            // add the connected user in the DB
+            Repository.createUser(username, socket.id);
             // send to the room that a new user has connected
             socket.to("1").emit("user_connected", username)
             // return the user already connected in room (if any)
-            let connectedUser = ''
-            for (let key in usersInRoom) { 
-                if (key !== socket.id)
-                    connectedUser = usersInRoom[key]        
-            }
-
-            callback({
-                message: 'USER CONNECTED',
-                connectedUser: connectedUser
+            Repository.findOtherConnectedUsers(username).then(user => {
+                // if there is no other connected user, return an empty string
+                let connectedUser = "" 
+                let isReady = false
+                if (user !== null) {
+                    connectedUser = user.username
+                    isReady = user.isReady
+                }
+                callback({
+                    message: 'USER CONNECTED',
+                    connectedUser: connectedUser,
+                    isReady: isReady
+                })
             })
-
         } else {
             // if there are already 2 players in game, display a "FULL ROOM" error message to the client
             callback({
@@ -64,13 +66,16 @@ io.on("connection", (socket) => {
     })
 
     socket.on("user-ready", (username) => {
+        // update the player that's ready in the DB
+        Repository.playerIsReady(username)
+        // tell to the other user that you're ready
         socket.to("1").emit("other_user_ready")
     })
 
     // leave the room when player goes back in page 
     socket.on("leave-room", (username) => {
-        // remove the user from the list
-        delete usersInRoom[socket.id]
+        // remove the user from the DB when disconnecting
+        Repository.deleteUserByUsername(username)
         //alert the room that the user has disconnected
         socket.to("1").emit("user_disconnected")
         // remove the user from the socket
@@ -79,8 +84,8 @@ io.on("connection", (socket) => {
     })
 
     socket.on("disconnect", () => {
-        // remove the user from the list
-        delete usersInRoom[socket.id]
+        // remove the user from the DB when disconnecting
+        Repository.deleteUserBySocket(socket.id)
         //alert the room that the user has disconnected
         socket.to("1").emit("user_disconnected")
         console.log("User disconnected: " + socket.id)

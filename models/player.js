@@ -15,7 +15,8 @@ module.exports = (sequelize, DataTypes) => {
 
   Player.init({
     username: DataTypes.STRING,
-    isReady: DataTypes.BOOLEAN
+    isReady: DataTypes.BOOLEAN,
+    socketId: DataTypes.STRING
   }, 
   {
     sequelize,
