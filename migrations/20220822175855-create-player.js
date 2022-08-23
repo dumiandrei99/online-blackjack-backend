@@ -14,6 +14,15 @@ module.exports = {
       isReady: {
         type: Sequelize.BOOLEAN
       },
+      socketId: {
+        type: Sequelize.STRING
+      },
+      totalCredits: {
+        type: Sequelize.INTEGER
+      },
+      turnToAct: {
+        type: Sequelize.INTEGER
+      },
       createdAt: {
         allowNull: false,
         type: Sequelize.DATE
