@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "sequelize model:generate --name Score --attributes username:string,score:integer && sequelize model:generate --name Player --attributes username:string,isReady:boolean, socketId:string,totalCredits:integer,turnToAct:boolean && sequelize model:generate --name Card --attributes username:string,card:string,value:integer && sequelize model:generate --name Bet --attributes username:string,amount:integer && sequelize db:migrate --env production --force",
+    "build": "sequelize db:migrate --env production",
     "start": "nodemon index.js"
   },
   "repository": {
