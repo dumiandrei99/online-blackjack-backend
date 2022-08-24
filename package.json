@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "sequelize db:migrate --env production",
+    "build": "npm -i sequelize && sequelize db:migrate --env production",
     "start": "nodemon index.js"
   },
   "repository": {
