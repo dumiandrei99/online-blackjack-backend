@@ -8,7 +8,6 @@ const PlayerRepository = require('./repository/PlayerRepository')
 const BetRepository = require('./repository/BetRepository')
 const CardRepository = require('./repository/CardRepository')
 const ScoreRepository = require('./repository/ScoreRepository');
-const { equal } = require('assert');
 
 const cardNumbersAndValues = {
     'two' : 2,
@@ -25,9 +24,7 @@ const cardNumbersAndValues = {
     'king' : 10,
     'ace' : 11 // or 1, but this will be set when calculating the total for the player
 }
-const cardColorways = ['hearts', 'spades', 'diamonds', 'clubs']
-
-let cardsGeneratedForDealer = false;
+const cardColorways = ['hearts', 'clubs', 'diamonds', 'spades']
 
 const generateRandomCard = async (username) => {
     let dictionaryKeys = Object.keys(cardNumbersAndValues)
@@ -36,14 +33,25 @@ const generateRandomCard = async (username) => {
     let card = randomCardNumber + "_" + colorway
     let value = cardNumbersAndValues[randomCardNumber];
 
-    // save the generated card to DB
-    CardRepository.addCard(username, card, value)
+    let sameCard = await CardRepository.getCardByUsernameAndCard(username, card)
 
-    let cardAndValue = {
-        card: card,
-        value: value
+    // never generate the same card for a user if he already has it
+    while (sameCard !== null) {
+        randomCardNumber = dictionaryKeys[Math.floor(dictionaryKeys.length * Math.random())]
+        colorway = cardColorways[Math.floor(Math.random() * cardColorways.length)];
+        card = randomCardNumber + "_" + colorway
+        value = cardNumbersAndValues[randomCardNumber]
+        sameCard = await CardRepository.getCardByUsernameAndCard(username, card)
     }
-    return cardAndValue
+
+    let addedCard = await CardRepository.addCard(username, card, value)
+    if (addedCard != null) {
+        let cardAndValue = {
+            card: card,
+            value: value
+        }
+        return cardAndValue
+    }
 }
 const calculateFirstScore = async (username, cards) => {
     let score = 0;
@@ -69,10 +77,27 @@ const calculateScoreOnHit = async (username, card) => {
     for (const [cardNameAndColor, cardValue] of Object.entries(card)) {
         let cardName = cardNameAndColor.split("_")
         if (cardName[0] !== 'ace') {
-            score += cardValue 
+            let aceInHand = await CardRepository.isAceInHand(username)
+            // if there is an ace in hand with the value of 11
+            if (aceInHand !== null) {
+                // and it would be more suitable for the user to have it to 1 (it wouldn't bust)
+                if (score + cardValue > 21) {
+                    // transform the ace's value to 1
+                    score += (cardValue - 10)
+                    // update the ace's value to 1 in DB
+                    CardRepository.setAceValueToOne(aceInHand.id)
+                } else {
+                    score += cardValue
+                }
+            } else {
+                score += cardValue 
+            }
         } else {
             if (score + 11 > 21) {
-                score += 1
+                score += 1;
+                let cardObject = await CardRepository.getCardByUsernameAndCard(username, cardNameAndColor);
+                // update the ace's value to 1 in DB
+                CardRepository.setAceValueToOne(cardObject.id);
             } else {
                 score += 11;
             }
@@ -100,9 +125,17 @@ io.on("connection", (socket) => {
     console.log("User connected: " + socket.id);
 
     // join to the blackjack game
-    socket.on("join-game", (username, callback) => {
+    socket.on("join-game", async (username, callback) => {
         // initial number of players connected to the blackjack game is 0
         let numberOfPlayersConnected = 0;
+        
+        let player = await PlayerRepository.findUserByUsername(username)
+        if (player !== null) {
+            callback({
+                message: "USERNAME ALREADY EXISTS!"
+            })
+            return;
+        }
     
         // if the room is not defined yet, it means that nobody joined the game yet, so the size of the room at this moment is 0 (no players joined)
         if (io.sockets.adapter.rooms.get('1') !== undefined) { 
@@ -117,10 +150,10 @@ io.on("connection", (socket) => {
             // add the connected user in the DB
             // set it's turn to act whenever the round starts, if he is the first to join the room
             if (numberOfPlayersConnected === 0) {
-                PlayerRepository.createUser(username, socket.id, 500, 1);
+                PlayerRepository.createUser(username, socket.id, 150, 1);
             } else {
                 // add the last user and the dealer and start the game
-                PlayerRepository.createUser(username, socket.id, 500, 2);
+                PlayerRepository.createUser(username, socket.id, 150, 2);
                 PlayerRepository.createUser("dealer", socket.id, 0, 3);
             }
             // send to the room that a new user has connected
@@ -179,12 +212,9 @@ io.on("connection", (socket) => {
     })
 
     socket.on("generate-dealer-cards", async (username, callback) => {
-        // // we need to generate the card for the dealer only once
-        // // so we'll check if the user doing the request
-        // // is the first one introduced in the DB
-        // let firstUser = await PlayerRepository.findFirstRecord();
-        // let user = await PlayerRepository.findUserByUsername(username)
-        //if (firstUser.username === user.username) {
+        let firstUser = await PlayerRepository.findFirstRecord();
+        let user = await PlayerRepository.findUserByUsername(username)
+        if (firstUser.username === user.username) {
             cardsGeneratedForDealer = true
             let dealerCards = {}
             let card = await generateRandomCard("dealer")
@@ -197,21 +227,13 @@ io.on("connection", (socket) => {
                 dealerCards: dealerCards,
                 score: score
             })
-        //}
+        }
     })
 
     socket.on("generate-player-cards", async (username, callback) => { 
         let cards = {}
         for (let i = 0 ; i < 2 ; i++) {
             let card = await generateRandomCard(username)
-            // don't generate the same two cards on the first hand (for example, both cards would be Aces of Spades)
-            if (i === 1) {
-                if (card === card.card) {
-                    while (card !== card.card) {
-                        card = await generateRandomCard(username)
-                    }
-                }
-            }
             cards[card.card] = card.value
         }
 
@@ -246,7 +268,9 @@ io.on("connection", (socket) => {
             let card = {}
             let randomCard = await generateRandomCard("dealer")
             card[randomCard.card] = randomCard.value
+            console.log(card)
             score = await calculateScoreOnHit("dealer", card)
+            console.log(score)
             socket.to("1").emit("opponent_dealer_card", {card: card, score: score})
             callback({
                 card: card,
@@ -289,6 +313,28 @@ io.on("connection", (socket) => {
 
     socket.on("set-other-dealer-stand", () => {
         socket.to("1").emit("set_other_dealer_stand", {outcome : "STAND"})
+    })
+
+    socket.on("clean-db-tables", () => {
+        console.log("cleaned db")
+        CardRepository.deleteAllRecords()
+        BetRepository.deleteAllRecords()
+        ScoreRepository.deleteAllRecords()
+    })
+
+    socket.on("update_total_credits", (username, totalCredits) => {
+        PlayerRepository.updateTotalCreditsAmount(username, totalCredits)
+        socket.to("1").emit("update-opponent-credits", {credits: totalCredits})
+    })
+
+    
+    socket.on("total-credits", async (username, otherUsername, callback) => {
+        let userObject = await PlayerRepository.findUserByUsername(username)
+        let otherUserObject = await PlayerRepository.findUserByUsername(otherUsername)
+        callback({
+            myCredits: userObject.totalCredits,
+            otherCredits: otherUserObject.totalCredits
+        })
     })
 
     // leave the room when player goes back in page 
