@@ -115,8 +115,8 @@ const server = http.createServer(app)
 // set up the socket.io server
 const io = new Server(server, {
     cors: {
-        // accept requests from the React client
-        origin: "http://localhost:3000",
+        // accept requests from the React client deployed on heroku
+        origin: "https://blackjack-be-andrei-dumitrescu.herokuapp.com/",
     }
 } )
 
